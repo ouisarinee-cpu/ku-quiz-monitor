@@ -1,165 +1,134 @@
 <!doctype html>
 <html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>KU Quiz — Camera & Mic Monitor (Compact)</title>
+<title>KU Quiz Monitor — Student</title>
 <style>
 :root{font-family:system-ui,"Noto Sans Thai",sans-serif;color:#173047}*{box-sizing:border-box}
-body{max-width:1050px;margin:20px auto;padding:0 15px;background:#f7f9fb}
-h1{font-size:1.6rem}h2{font-size:1.15rem;margin:0 0 12px}
-.panel{background:white;border:1px solid #d9e2ea;border-radius:12px;padding:18px;margin:14px 0}
-button,input{font:inherit}button{padding:10px 14px;border:1px solid #9bb0c0;border-radius:8px;background:#eaf5ff;margin:4px 4px 4px 0;cursor:pointer}
-button:disabled{opacity:.45;cursor:default}button.primary{background:#087a66;color:white;border-color:#087a66}
-video{width:100%;max-height:340px;background:#111;border-radius:9px;object-fit:contain}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:680px){.cols{grid-template-columns:1fr}}
-small,.muted{color:#536b7b}pre{background:#eef2f6;padding:12px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto}
-.stat{font-weight:700;font-variant-numeric:tabular-nums}.notice{background:#fff7e8;padding:12px;border-radius:8px}
-label{display:block;margin:8px 0}input[type=range]{width:200px;vertical-align:middle}
-
-/* Compact quiz monitor: keep original V5.1 detection and event logic intact. */
-body{max-width:440px;margin:10px auto;padding:0 10px;background:#f7f9fb}
-h1{font-size:1.05rem;margin:8px 0}
-h2{font-size:.92rem}
-.panel{padding:10px;margin:8px 0;border-radius:10px}
-button{padding:8px 10px;font-size:.86rem}
-body>p:first-of-type{font-size:.72rem;color:#536b7b}
-.cols{display:block}
-#cameraView{width:150px;max-height:112px;object-fit:cover;border-radius:8px}
-#deviceStatus,#faceStatus,#micStatus{font-size:.82rem;margin:6px 0}
-#faceEngine{display:block;font-size:.7rem}
-#threshold{width:110px}
-label:has(#threshold){font-size:.75rem}
-.panel:has(#lesson),.panel:has(#watched),.panel:has(#log){display:none}
-.panel:has(#cameraView){padding:8px}
-</style></head>
-<body>
-<h1>KU — สถานะกล้องและไมโครโฟน</h1>
-<p>โหมดแสดงผลขนาดเล็ก · ตรวจอุปกรณ์ในเครื่อง · ไม่ส่งภาพหรือเสียงไปยังเซิร์ฟเวอร์</p>
+body{margin:0;padding:12px;background:#f7f9fb;max-width:440px}
+h1{font-size:1rem;margin:0 0 6px}p{font-size:.82rem;line-height:1.5}
+.panel{background:white;border:1px solid #d9e2ea;border-radius:10px;padding:12px;margin:10px 0}
+button{padding:10px;border-radius:8px;border:1px solid #a9c2c9;background:#eaf5ff;font:inherit;cursor:pointer}
+button.primary{background:#087a66;color:white;border-color:#087a66}
+button:disabled{opacity:.45}video{width:144px;height:108px;object-fit:cover;background:#111;border-radius:8px}
+#status{font-weight:600}small{color:#5b6978} .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+</style></head><body>
+<h1>KU — ตรวจสอบกล้องและไมโครโฟน</h1>
+<p>ใช้ระหว่างทำข้อสอบ · ไม่ส่งภาพหรือเสียงไปยัง Student Portal</p>
 <section class="panel">
-<h2>1. อุปกรณ์และการตรวจจับ</h2>
-<button id="start" class="primary">เปิดกล้องและไมโครโฟน</button>
-<button id="stop" disabled>หยุดตรวจทั้งหมด</button>
-<p id="deviceStatus" role="status">ยังไม่เริ่ม</p>
-<p id="faceStatus">ใบหน้า: ยังไม่ตรวจ</p>
-<p id="micStatus">ไมโครโฟน: ยังไม่ตรวจ</p>
-<label>เกณฑ์ระดับเสียงดัง (RMS): <input id="threshold" type="range" min="0.02" max="0.25" step="0.01" value="0.10"><output id="thresholdValue">0.10</output></label>
-<small>เสียงดังไม่ได้หมายความว่ากำลังพูดคุย และไม่ใช้เป็นเหตุให้สอบตกอัตโนมัติ</small>
+<div class="row"><button class="primary" id="start">เปิดกล้องและไมค์</button><button id="stop" disabled>หยุดตรวจ</button></div>
+<p id="status" role="status">ยังไม่เริ่ม</p>
+<p id="cameraStatus">กล้อง: รอตรวจ</p>
+<p id="micStatus">ไมโครโฟน: รอตรวจ</p>
+<p id="faceStatus">ใบหน้า: รอตรวจ</p>
+<video id="preview" autoplay playsinline muted></video>
+<small>หากกล้องหรือไมค์หยุดทำงาน ระบบจะแจ้งสถานะไปยังหน้าแบบทดสอบ ไม่ใช้การตรวจจับเพียงอย่างเดียวตัดสินว่าทุจริต</small>
 </section>
-<div class="cols">
-<section class="panel"><h2>ภาพกล้อง</h2><video id="cameraView" autoplay playsinline muted></video><small id="faceEngine">Face detector: ยังไม่เริ่ม</small></section>
-<section class="panel"><h2>2. วิดีโอสำหรับทดลอง</h2>
-<label>เลือกวิดีโอจากเครื่อง (ไม่อัปโหลด): <input type="file" id="videoFile" accept="video/*"></label>
-<video id="lesson" controls playsinline></video>
-<p class="muted">ระบบนับเฉพาะช่วงที่วิดีโอกำลังเล่นและกล้อง/ไมค์พร้อม หากหยุดเล่น จะหยุดนับเวลา</p>
-</section>
-</div>
-<section class="panel">
-<h2>3. รายงานการทดลอง</h2>
-<p>เวลาที่เล่นและตรวจได้: <span class="stat" id="watched">0.0</span> วินาที</p>
-<p>ช่วงไม่พบใบหน้า: <span class="stat" id="absent">0.0</span> วินาที</p>
-<p>ช่วงเสียงดัง: <span class="stat" id="loud">0.0</span> วินาที</p>
-<p>ช่วงเหตุการณ์รวม (ไม่นับซ้อน): <span class="stat" id="combined">0.0</span> วินาที</p>
-<p>สัดส่วนเหตุการณ์รวม: <span class="stat" id="percent">—</span></p>
-<p id="result" class="notice">รอเริ่มทดลอง — เกณฑ์เกิน 20% ใช้เพื่อแสดงผลเท่านั้น</p>
-<button id="export">ส่งออกรายงาน JSON</button><button id="reset">ล้างผลทดลอง</button>
-</section>
-<section class="panel"><h2>บันทึกเหตุการณ์</h2><pre id="log"></pre></section>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/face_detection.js"></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
-let stream=null,audioCtx=null,analyser=null,source=null,faceDetector=null,faceReady=false,facePresent=null;
-let busy=false,raf=0,timer=0,lastTick=0,watched=0,absent=0,loud=0,combined=0,logs=[],objectURL=null;
-let micRms=null,deviceReady=false,faceSampleAt=0;
-function log(message){let t=new Date().toLocaleTimeString('th-TH');logs.push({time:new Date().toISOString(),message});$('log').textContent=(t+' '+message+'\n'+$('log').textContent).slice(0,12000)}
-function display(){
- $('watched').textContent=watched.toFixed(1);$('absent').textContent=absent.toFixed(1);
- $('loud').textContent=loud.toFixed(1);$('combined').textContent=combined.toFixed(1);
- $('percent').textContent=watched?((combined/watched)*100).toFixed(1)+'%':'—';
- $('result').textContent=watched?(combined/watched>0.2?'เหตุการณ์เกิน 20% — ต้องตรวจทาน (ยังไม่ตัดคะแนน)':'เหตุการณ์ไม่เกิน 20% — ผลทดลอง ไม่ใช่การรับรองการเรียน'):'รอเริ่มทดลอง — เกณฑ์เกิน 20% ใช้เพื่อแสดงผลเท่านั้น';
+const query=new URLSearchParams(location.search);
+const bridgeMode=query.get('bridge')==='1';
+const nonce=query.get('nonce')||'';
+const parentOrigin=query.get('parentOrigin')||'';
+const needCamera=!bridgeMode||query.get('camera')==='1';
+const needMic=!bridgeMode||query.get('mic')==='1';
+let stream=null, audioCtx=null, source=null, analyser=null, raf=0, beat=0, faceTimer=0;
+let detector=null, busy=false, ready=false, stopping=false, facePresent=null;
+function allowedParent(origin){
+ try{
+  const u=new URL(origin);
+  return u.protocol==='https:' && (u.hostname==='script.google.com' ||
+    u.hostname==='script.googleusercontent.com' || u.hostname.endsWith('.googleusercontent.com'));
+ }catch(e){return false;}
 }
-function stopStream(){
- if(timer){clearInterval(timer);timer=0}if(raf){cancelAnimationFrame(raf);raf=0}
- if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;
+const trusted=bridgeMode&&window.opener&&nonce.length===32&&allowedParent(parentOrigin);
+function send(type,extra={}){
+ if(!trusted)return;
+ try{window.opener.postMessage(Object.assign({source:'ku-quiz-monitor-bridge-v1',nonce,type},extra),parentOrigin)}catch(e){}
+}
+function live(kind){return !!stream&&stream.getTracks().some(t=>t.kind===kind&&t.readyState==='live')}
+function health(){
+ const cameraLive=needCamera?live('video'):null, micLive=needMic?live('audio'):null;
+ return {cameraLive,micLive,facePresent};
+}
+function heartbeat(){
+ const h=health();
+ $('cameraStatus').textContent='กล้อง: '+(needCamera?(h.cameraLive?'พร้อม':'หยุดทำงาน'):'ไม่กำหนด');
+ $('micStatus').textContent='ไมโครโฟน: '+(needMic?(h.micLive?'พร้อม':'หยุดทำงาน'):'ไม่กำหนด');
+ send('HEARTBEAT',h);
+}
+async function stop(notify=true){
+ stopping=true;ready=false;
+ clearInterval(beat);clearTimeout(faceTimer);cancelAnimationFrame(raf);
+ beat=0;faceTimer=0;raf=0;
+ if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
  if(source){try{source.disconnect()}catch(e){}source=null}
- if(audioCtx){audioCtx.close().catch(()=>{});audioCtx=null}
- analyser=null;deviceReady=false;faceReady=false;facePresent=null;micRms=null;
- $('cameraView').srcObject=null;$('stop').disabled=true;$('start').disabled=false;
- $('deviceStatus').textContent='หยุดตรวจแล้ว';$('faceStatus').textContent='ใบหน้า: หยุดตรวจ';
- $('micStatus').textContent='ไมโครโฟน: หยุดตรวจ';$('lesson').pause();
+ if(audioCtx){try{await audioCtx.close()}catch(e){}audioCtx=null}
+ analyser=null;detector=null;facePresent=null;
+ $('preview').srcObject=null;$('start').disabled=false;$('stop').disabled=true;
+ $('status').textContent='หยุดตรวจแล้ว';
+ if(notify)send('STOPPED');
+ stopping=false;
 }
-async function start(){
- stopStream();$('start').disabled=true;$('deviceStatus').textContent='กำลังขออนุญาตอุปกรณ์...';
- try{
-  if(!navigator.mediaDevices?.getUserMedia)throw new Error('เบราว์เซอร์ไม่รองรับ getUserMedia');
-  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:true});
-  $('cameraView').srcObject=stream;await $('cameraView').play();
-  audioCtx=new (window.AudioContext||window.webkitAudioContext)();await audioCtx.resume();
-  source=audioCtx.createMediaStreamSource(stream);analyser=audioCtx.createAnalyser();analyser.fftSize=2048;source.connect(analyser);
-  deviceReady=true;$('stop').disabled=false;$('deviceStatus').textContent='เปิดกล้องและไมโครโฟนสำเร็จ';
-  log('เปิดกล้องและไมโครโฟนสำเร็จ');
-  await setupFace();
-  lastTick=performance.now();timer=setInterval(tick,200);
-  monitorAudio();
- }catch(err){log('ERROR '+err.name+': '+err.message);$('deviceStatus').textContent='เปิดไม่สำเร็จ: '+err.name+' — '+err.message;stopStream();$('deviceStatus').textContent='เปิดไม่สำเร็จ: '+err.name+' — '+err.message}
-}
-async function setupFace(){
- if(typeof FaceDetection==='undefined'){
-  $('faceEngine').textContent='Face detector โหลดไม่สำเร็จ — ต้องเชื่อมต่ออินเทอร์เน็ตและอนุญาต CDN';log('ไม่สามารถโหลด FaceDetection; ปิดการนับเวลาไม่พบใบหน้า');return;
- }
- try{
-  faceDetector=new FaceDetection({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/'+f});
-  faceDetector.setOptions({model:'short',minDetectionConfidence:0.6});
-  faceDetector.onResults(r=>{
-   facePresent=!!(r.detections&&r.detections.length);
-   faceReady=true;$('faceStatus').textContent='ใบหน้า: '+(facePresent?'พบใบหน้า':'ไม่พบใบหน้า');
-  });
-  $('faceEngine').textContent='Face detector: MediaPipe (กำลังตรวจ)';
-  faceLoop();
- }catch(e){$('faceEngine').textContent='Face detector ไม่พร้อม: '+e.message;log('Face detector ERROR '+e.message)}
-}
-async function faceLoop(){
- if(!deviceReady)return;
- if(!busy&&$('cameraView').readyState>=2){
+async function detectFace(){
+ if(!ready||!detector||!live('video'))return;
+ if(!busy&&$('preview').readyState>=2){
   busy=true;
-  try{await faceDetector.send({image:$('cameraView')})}catch(e){faceReady=false;$('faceEngine').textContent='Face detector ขัดข้อง: '+e.message;log('Face detection ERROR '+e.message)}
+  try{await detector.send({image:$('preview')})}
+  catch(e){$('faceStatus').textContent='ใบหน้า: ตัวตรวจจับไม่พร้อม'}
   finally{busy=false}
  }
- if(deviceReady)setTimeout(faceLoop,350);
+ if(ready)faceTimer=setTimeout(detectFace,500);
 }
-function monitorAudio(){
- if(!deviceReady||!analyser)return;
- let data=new Float32Array(analyser.fftSize);analyser.getFloatTimeDomainData(data);
- let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];
- micRms=Math.sqrt(sum/data.length);
- $('micStatus').textContent='ไมโครโฟน RMS: '+micRms.toFixed(3)+(micRms>Number($('threshold').value)?' (เสียงดัง)':'');
- raf=requestAnimationFrame(monitorAudio);
+async function setupFace(){
+ if(!needCamera)return;
+ if(typeof FaceDetection==='undefined'){$('faceStatus').textContent='ใบหน้า: ไม่สามารถโหลดตัวตรวจจับ';return}
+ try{
+  detector=new FaceDetection({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/'+f});
+  detector.setOptions({model:'short',minDetectionConfidence:0.6});
+  detector.onResults(r=>{
+   facePresent=!!(r.detections&&r.detections.length);
+   $('faceStatus').textContent='ใบหน้า: '+(facePresent?'ตรวจพบ':'ไม่พบ');
+  });
+  detectFace();
+ }catch(e){$('faceStatus').textContent='ใบหน้า: ตัวตรวจจับไม่พร้อม'}
 }
-function tick(){
- const now=performance.now(),dt=Math.min((now-lastTick)/1000,0.4);lastTick=now;
- if(!deviceReady||$('lesson').paused||$('lesson').ended)return;
- // Do not count intervals without a working face detector, or without microphone data.
- if(!faceReady||micRms===null){$('result').textContent='กำลังรอตัวตรวจใบหน้าหรือไมโครโฟน — ยังไม่นับเวลา';return}
- const noFace=facePresent===false,highSound=micRms>Number($('threshold').value);
- watched+=dt;if(noFace)absent+=dt;if(highSound)loud+=dt;if(noFace||highSound)combined+=dt;
- display();
+async function start(){
+ await stop(false);
+ $('start').disabled=true;$('status').textContent='กำลังขออนุญาตอุปกรณ์...';
+ try{
+  if(bridgeMode&&!trusted)throw Error('ไม่พบการเชื่อมต่อที่ถูกต้องจาก Student Portal');
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('เบราว์เซอร์ไม่รองรับกล้องและไมค์');
+  stream=await navigator.mediaDevices.getUserMedia({
+   video:needCamera?{facingMode:'user'}:false,audio:needMic
+  });
+  if((needCamera&&!live('video'))||(needMic&&!live('audio')))throw Error('อุปกรณ์ที่กำหนดไม่พร้อม');
+  if(needCamera){$('preview').srcObject=stream;await $('preview').play()}
+  else $('preview').hidden=true;
+  if(needMic){
+   audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+   await audioCtx.resume();source=audioCtx.createMediaStreamSource(stream);
+   analyser=audioCtx.createAnalyser();source.connect(analyser);
+  }
+  for(const track of stream.getTracks()){
+   track.addEventListener('ended',()=>{if(!stopping){$('status').textContent='อุปกรณ์หยุดทำงาน';heartbeat()}});
+  }
+  ready=true;$('start').disabled=true;$('stop').disabled=false;
+  $('status').textContent='เปิดอุปกรณ์สำเร็จ · กำลังตรวจสอบ';
+  heartbeat();beat=setInterval(heartbeat,3000);
+  send('READY',health());
+  setupFace();
+ }catch(e){
+  const message=String(e.name||'Error')+': '+String(e.message||e);
+  await stop(false);$('status').textContent='เปิดไม่สำเร็จ: '+message;
+  send('ERROR',{message:message.slice(0,180)});
+ }
 }
-$('start').onclick=start;$('stop').onclick=()=>{stopStream();log('หยุดตรวจ')};
-$('threshold').oninput=()=>{$('thresholdValue').textContent=Number($('threshold').value).toFixed(2)};
-$('videoFile').onchange=e=>{
- const f=e.target.files?.[0];if(!f)return;
- if(objectURL)URL.revokeObjectURL(objectURL);
- objectURL=URL.createObjectURL(f);$('lesson').src=objectURL;log('เลือกวิดีโอ '+f.name+' (ไฟล์อยู่ในเครื่อง)');
-};
-$('lesson').addEventListener('play',()=>{if(!deviceReady){$('lesson').pause();alert('กรุณาเปิดกล้องและไมโครโฟนก่อนเล่นวิดีโอ');return}log('เริ่มเล่นวิดีโอ')});
-$('lesson').addEventListener('pause',()=>log('หยุดเล่นวิดีโอ'));
-$('reset').onclick=()=>{watched=absent=loud=combined=0;logs=[];$('log').textContent='';display();log('ล้างผลทดลอง')};
-$('export').onclick=()=>{
- const data={version:'5.1-test',createdAt:new Date().toISOString(),watchedSeconds:+watched.toFixed(2),
- noFaceSeconds:+absent.toFixed(2),loudSeconds:+loud.toFixed(2),combinedSeconds:+combined.toFixed(2),
- eventPercent:watched?+(combined/watched*100).toFixed(2):null,thresholdRms:Number($('threshold').value),
- note:'Experimental client-side data; not verified; no grading',events:logs};
- const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
- const a=document.createElement('a');a.href=url;a.download='W01_monitor_test_'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-};
-window.addEventListener('pagehide',()=>{if(stream)stream.getTracks().forEach(t=>t.stop())});
-display();log('Monitoring V5.1 พร้อมทดสอบ');
+$('start').onclick=start;
+$('stop').onclick=()=>stop(true);
+window.addEventListener('pagehide',()=>{if(ready)send('STOPPED');if(stream)stream.getTracks().forEach(t=>t.stop())});
+if(bridgeMode&&!trusted){
+ $('status').textContent='กรุณาเปิดหน้าต่างนี้จาก Student Portal';
+ $('start').disabled=true;
+}
 </script></body></html>
