@@ -9,18 +9,19 @@ h1{font-size:1rem;margin:0 0 6px}p{font-size:.82rem;line-height:1.5}
 button{padding:10px;border-radius:8px;border:1px solid #a9c2c9;background:#eaf5ff;font:inherit;cursor:pointer}
 button.primary{background:#087a66;color:white;border-color:#087a66}
 button:disabled{opacity:.45}video{width:144px;height:108px;object-fit:cover;background:#111;border-radius:8px}
-#status{font-weight:600}small{color:#5b6978} .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#status{font-weight:600}small{color:#5b6978}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 </style></head><body>
 <h1>KU — ตรวจสอบกล้องและไมโครโฟน</h1>
-<p>ใช้ระหว่างทำข้อสอบ · ไม่ส่งภาพหรือเสียงไปยัง Student Portal</p>
+<p id="intro">ใช้ระหว่างทำข้อสอบ · ไม่ส่งภาพหรือเสียงไปยัง Student Portal</p>
 <section class="panel">
 <div class="row"><button class="primary" id="start">เปิดกล้องและไมค์</button><button id="stop" disabled>หยุดตรวจ</button></div>
 <p id="status" role="status">ยังไม่เริ่ม</p>
 <p id="cameraStatus">กล้อง: รอตรวจ</p>
 <p id="micStatus">ไมโครโฟน: รอตรวจ</p>
 <p id="faceStatus">ใบหน้า: รอตรวจ</p>
+<p id="noiseStatus">ระดับเสียง: รอตรวจ</p>
 <video id="preview" autoplay playsinline muted></video>
-<small>หากกล้องหรือไมค์หยุดทำงาน ระบบจะแจ้งสถานะไปยังหน้าแบบทดสอบ ไม่ใช้การตรวจจับเพียงอย่างเดียวตัดสินว่าทุจริต</small>
+<small>ระบบส่งเฉพาะสถานะอุปกรณ์ ใบหน้า และระดับเสียงโดยประมาณ ไม่ส่งภาพหรือเสียงดิบ ไม่ใช้การตรวจจับเพียงอย่างเดียวตัดสินว่าทุจริต</small>
 </section>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/face_detection.js"></script>
 <script>
@@ -32,14 +33,17 @@ const nonce=query.get('nonce')||'';
 const parentOrigin=query.get('parentOrigin')||'';
 const needCamera=!bridgeMode||query.get('camera')==='1';
 const needMic=!bridgeMode||query.get('mic')==='1';
-let stream=null, audioCtx=null, source=null, analyser=null, raf=0, beat=0, faceTimer=0;
-let detector=null, busy=false, ready=false, stopping=false, facePresent=null;
+// Optional video mode. Existing QUIZ behavior and message names remain unchanged.
+const monitorMode=query.get('mode')==='video'?'VIDEO':'QUIZ';
+const noiseThresholdDbfs=-30; // Pilot threshold, NOT calibrated physical dB SPL.
+const noiseHoldMs=1500;
+let stream=null,audioCtx=null,source=null,analyser=null,raf=0,beat=0,faceTimer=0;
+let detector=null,busy=false,ready=false,stopping=false,facePresent=null;
+let audioBuffer=null,noiseSince=0,noiseActive=false,audioDbfs=null;
+if(monitorMode==='VIDEO')$('intro').textContent='ใช้ระหว่างรับชมวิดีโอ · ไม่ส่งภาพหรือเสียงไปยัง Student Portal';
 function allowedParent(origin){
- try{
-  const u=new URL(origin);
-  return u.protocol==='https:' && (u.hostname==='script.google.com' ||
-    u.hostname==='script.googleusercontent.com' || u.hostname.endsWith('.googleusercontent.com'));
- }catch(e){return false;}
+ try{const u=new URL(origin);return u.protocol==='https:' && (u.hostname==='script.google.com'||u.hostname==='script.googleusercontent.com'||u.hostname.endsWith('.googleusercontent.com'))}
+ catch(e){return false}
 }
 const trusted=bridgeMode&&window.opener&&nonce.length===32&&allowedParent(parentOrigin);
 function send(type,extra={}){
@@ -47,12 +51,32 @@ function send(type,extra={}){
  try{window.opener.postMessage(Object.assign({source:'ku-quiz-monitor-bridge-v1',nonce,type},extra),parentOrigin)}catch(e){}
 }
 function live(kind){return !!stream&&stream.getTracks().some(t=>t.kind===kind&&t.readyState==='live')}
+function measureAudio(){
+ if(!ready||!needMic||!analyser||!live('audio')){
+  audioDbfs=null;noiseActive=false;noiseSince=0;return;
+ }
+ if(!audioBuffer||audioBuffer.length!==analyser.fftSize)audioBuffer=new Float32Array(analyser.fftSize);
+ analyser.getFloatTimeDomainData(audioBuffer);
+ let sum=0;for(let i=0;i<audioBuffer.length;i++)sum+=audioBuffer[i]*audioBuffer[i];
+ const rms=Math.sqrt(sum/audioBuffer.length);
+ audioDbfs=Math.max(-100,Math.min(0,20*Math.log10(Math.max(rms,0.00001))));
+ const loud=audioDbfs>=noiseThresholdDbfs;
+ if(loud){if(!noiseSince)noiseSince=Date.now();if(Date.now()-noiseSince>=noiseHoldMs)noiseActive=true}
+ else{noiseSince=0;noiseActive=false}
+ $('noiseStatus').textContent='ระดับเสียง: '+audioDbfs.toFixed(1)+' dBFS · '+(noiseActive?'เสียงดังต่อเนื่อง':'ปกติ/ต่ำกว่าเกณฑ์ทดลอง');
+}
 function health(){
- const cameraLive=needCamera?live('video'):null, micLive=needMic?live('audio'):null;
- return {cameraLive,micLive,facePresent};
+ const cameraLive=needCamera?live('video'):null,micLive=needMic?live('audio'):null;
+ const result={cameraLive,micLive,facePresent};
+ // Additive fields: old quiz bridge can ignore them. No raw microphone data is sent.
+ if(monitorMode==='VIDEO'){
+  result.monitorMode='VIDEO';result.audioDbfs=micLive?audioDbfs:null;
+  result.noiseActive=micLive?noiseActive:null;result.noiseThresholdDbfs=noiseThresholdDbfs;
+ }
+ return result;
 }
 function heartbeat(){
- const h=health();
+ measureAudio();const h=health();
  $('cameraStatus').textContent='กล้อง: '+(needCamera?(h.cameraLive?'พร้อม':'หยุดทำงาน'):'ไม่กำหนด');
  $('micStatus').textContent='ไมโครโฟน: '+(needMic?(h.micLive?'พร้อม':'หยุดทำงาน'):'ไม่กำหนด');
  send('HEARTBEAT',h);
@@ -64,11 +88,11 @@ async function stop(notify=true){
  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
  if(source){try{source.disconnect()}catch(e){}source=null}
  if(audioCtx){try{await audioCtx.close()}catch(e){}audioCtx=null}
- analyser=null;detector=null;facePresent=null;
+ analyser=null;audioBuffer=null;audioDbfs=null;noiseActive=false;noiseSince=0;
+ detector=null;facePresent=null;
  $('preview').srcObject=null;$('start').disabled=false;$('stop').disabled=true;
- $('status').textContent='หยุดตรวจแล้ว';
- if(notify)send('STOPPED');
- stopping=false;
+ $('status').textContent='หยุดตรวจแล้ว';$('noiseStatus').textContent='ระดับเสียง: หยุดตรวจ';
+ if(notify)send('STOPPED');stopping=false;
 }
 async function detectFace(){
  if(!ready||!detector||!live('video'))return;
@@ -86,49 +110,37 @@ async function setupFace(){
  try{
   detector=new FaceDetection({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/'+f});
   detector.setOptions({model:'short',minDetectionConfidence:0.6});
-  detector.onResults(r=>{
-   facePresent=!!(r.detections&&r.detections.length);
-   $('faceStatus').textContent='ใบหน้า: '+(facePresent?'ตรวจพบ':'ไม่พบ');
-  });
+  detector.onResults(r=>{facePresent=!!(r.detections&&r.detections.length);$('faceStatus').textContent='ใบหน้า: '+(facePresent?'ตรวจพบ':'ไม่พบ')});
   detectFace();
  }catch(e){$('faceStatus').textContent='ใบหน้า: ตัวตรวจจับไม่พร้อม'}
 }
 async function start(){
- await stop(false);
- $('start').disabled=true;$('status').textContent='กำลังขออนุญาตอุปกรณ์...';
+ await stop(false);$('start').disabled=true;$('status').textContent='กำลังขออนุญาตอุปกรณ์...';
  try{
   if(bridgeMode&&!trusted)throw Error('ไม่พบการเชื่อมต่อที่ถูกต้องจาก Student Portal');
   if(!navigator.mediaDevices?.getUserMedia)throw Error('เบราว์เซอร์ไม่รองรับกล้องและไมค์');
-  stream=await navigator.mediaDevices.getUserMedia({
-   video:needCamera?{facingMode:'user'}:false,audio:needMic
-  });
+  stream=await navigator.mediaDevices.getUserMedia({video:needCamera?{facingMode:'user'}:false,audio:needMic});
   if((needCamera&&!live('video'))||(needMic&&!live('audio')))throw Error('อุปกรณ์ที่กำหนดไม่พร้อม');
-  if(needCamera){$('preview').srcObject=stream;await $('preview').play()}
+  if(needCamera){$('preview').hidden=false;$('preview').srcObject=stream;await $('preview').play()}
   else $('preview').hidden=true;
   if(needMic){
    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
    await audioCtx.resume();source=audioCtx.createMediaStreamSource(stream);
-   analyser=audioCtx.createAnalyser();source.connect(analyser);
+   analyser=audioCtx.createAnalyser();analyser.fftSize=2048;analyser.smoothingTimeConstant=0.6;
+   source.connect(analyser);
   }
-  for(const track of stream.getTracks()){
-   track.addEventListener('ended',()=>{if(!stopping){$('status').textContent='อุปกรณ์หยุดทำงาน';heartbeat()}});
-  }
+  for(const track of stream.getTracks())track.addEventListener('ended',()=>{if(!stopping){$('status').textContent='อุปกรณ์หยุดทำงาน';heartbeat()}});
   ready=true;$('start').disabled=true;$('stop').disabled=false;
   $('status').textContent='เปิดอุปกรณ์สำเร็จ · กำลังตรวจสอบ';
-  heartbeat();beat=setInterval(heartbeat,3000);
-  send('READY',health());
-  setupFace();
+  heartbeat();beat=setInterval(heartbeat,500);
+  send('READY',health());setupFace();
  }catch(e){
   const message=String(e.name||'Error')+': '+String(e.message||e);
   await stop(false);$('status').textContent='เปิดไม่สำเร็จ: '+message;
   send('ERROR',{message:message.slice(0,180)});
  }
 }
-$('start').onclick=start;
-$('stop').onclick=()=>stop(true);
+$('start').onclick=start;$('stop').onclick=()=>stop(true);
 window.addEventListener('pagehide',()=>{if(ready)send('STOPPED');if(stream)stream.getTracks().forEach(t=>t.stop())});
-if(bridgeMode&&!trusted){
- $('status').textContent='กรุณาเปิดหน้าต่างนี้จาก Student Portal';
- $('start').disabled=true;
-}
+if(bridgeMode&&!trusted){$('status').textContent='กรุณาเปิดหน้าต่างนี้จาก Student Portal';$('start').disabled=true}
 </script></body></html>
